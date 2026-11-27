@@ -18,6 +18,21 @@ jobs:
       - name: Baixar projeto
         uses: actions/checkout@v4
 
+      - name: Localizar pasta do projeto
+        shell: bash
+        run: |
+          PROJECT_DIR=$(find . -type f \( -name "settings.gradle.kts" -o -name "settings.gradle" \) -not -path "*/.gradle/*" -print -quit | xargs -r dirname)
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERRO: settings.gradle.kts não encontrado!"
+            echo "Confira se os arquivos do projeto foram enviados ao GitHub."
+            exit 1
+          fi
+
+          PROJECT_DIR="${PROJECT_DIR#./}"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Projeto encontrado em: $PROJECT_DIR"
+
       - name: Configurar Java
         uses: actions/setup-java@v5
         with:
@@ -42,7 +57,7 @@ jobs:
       - name: Criar chave Debug
         run: |
           keytool -genkeypair \
-            -keystore debug.keystore \
+            -keystore "$PROJECT_DIR/debug.keystore" \
             -storepass android \
             -alias androiddebugkey \
             -keypass android \
@@ -52,13 +67,14 @@ jobs:
             -validity 10000
 
       - name: Compilar aplicativo
-        run: gradle :app:assembleDebug --stacktrace
+        run: |
+          gradle -p "$PROJECT_DIR" :app:assembleDebug --stacktrace
 
       - name: Salvar APK
         uses: actions/upload-artifact@v4
         with:
           name: StormLauncher-APK
-          path: app/build/outputs/apk/debug/*.apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
           
