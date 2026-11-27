@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   build:
-    name: Compilar aplicativo Android
+    name: Compilar StormLauncher
     runs-on: ubuntu-latest
 
     steps:
@@ -20,20 +20,25 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configurar Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Configurar Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Instalar ferramentas Android
         run: |
-          yes | sdkmanager --licenses
-          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          sdkmanager --version
 
-      - name: Criar chave de assinatura Debug
+      - name: Instalar componentes Android
+        run: |
+          yes | sdkmanager --sdk_root="$ANDROID_HOME" --licenses
+          sdkmanager --sdk_root="$ANDROID_HOME" \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0"
+
+      - name: Criar chave Debug
         run: |
           keytool -genkeypair \
             -keystore debug.keystore \
@@ -48,10 +53,10 @@ jobs:
       - name: Preparar Gradle
         run: chmod +x ./gradlew
 
-      - name: Compilar APK
+      - name: Compilar aplicativo Android
         run: ./gradlew :app:assembleDebug --stacktrace
 
-      - name: Disponibilizar APK
+      - name: Salvar APK
         uses: actions/upload-artifact@v4
         with:
           name: StormLauncher-APK
