@@ -1,63 +1,81 @@
-Crie um CONVERSOR UNIVERSAL DE ZIP PARA APK ANDROID utilizando GitHub Actions.
 
-OBJETIVO: Transformar automaticamente um arquivo .ZIP contendo um projeto de aplicativo em um arquivo .APK instalável em dispositivos Android.
+name: ZIP para APK Android
 
-INSTRUÇÕES:
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "*.zip"
 
-1. Criar o arquivo .github/workflows/zip-to-apk.yml.
+permissions:
+  contents: read
 
-2. Configurar o GitHub Actions para funcionar com Ubuntu.
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
 
-3. Permitir iniciar a compilação manualmente pelo botão Run workflow.
+    steps:
+      - name: Baixar repositório
+        uses: actions/checkout@v4
 
-4. Localizar automaticamente o arquivo ZIP enviado ao repositório.
+      - name: Instalar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
 
-5. Extrair o conteúdo completo do ZIP, preservando a estrutura das pastas.
+      - name: Instalar Android SDK
+        uses: android-actions/setup-android@v3
 
-6. Analisar automaticamente o projeto e identificar sua tecnologia:
-- Android Studio
-- Java
-- Kotlin
-- Flutter
-- React Native
-- Ionic
-- Capacitor
-- HTML, CSS e JavaScript
+      - name: Instalar ferramentas
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip zip
 
-7. Instalar automaticamente as ferramentas e dependências necessárias, incluindo:
-- Java JDK
-- Android SDK
-- Android Build Tools
-- Gradle
-- Flutter SDK, quando necessário
-- Node.js, quando necessário
+      - name: Localizar e extrair ZIP
+        run: |
+          ZIP=$(find . -maxdepth 1 -name "*.zip" | head -n 1)
+          if [ -z "$ZIP" ]; then
+            echo "ERRO: Nenhum arquivo ZIP encontrado."
+            exit 1
+          fi
+          mkdir -p extracted
+          unzip -q "$ZIP" -d extracted
 
-8. Identificar automaticamente o arquivo principal de configuração do projeto.
+      - name: Identificar projeto Android
+        run: |
+          if [ -f extracted/gradlew ]; then
+            PROJECT="extracted"
+          else
+            GRADLEW=$(find extracted -name gradlew -type f | head -n 1)
+            if [ -z "$GRADLEW" ]; then
+              echo "ERRO: Projeto Gradle Android não encontrado."
+              exit 1
+            fi
+            PROJECT=$(dirname "$GRADLEW")
+          fi
+          echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
+          chmod +x "$PROJECT/gradlew"
 
-9. Executar o processo correto de compilação conforme a tecnologia identificada.
+      - name: Compilar APK
+        run: |
+          cd "$PROJECT"
+          ./gradlew assembleDebug --no-daemon
 
-10. Gerar um arquivo APK Android verdadeiro, válido e instalável.
+      - name: Localizar APK
+        run: |
+          mkdir -p output
+          find "$PROJECT" -type f -name "*.apk" -exec cp {} output/ \;
+          if [ -z "$(find output -name '*.apk' -print -quit)" ]; then
+            echo "ERRO: APK não foi gerado."
+            exit 1
+          fi
 
-11. Se houver erros, executar um diagnóstico detalhado e apresentar a causa e possíveis soluções.
-
-12. Não criar APK falso, vazio ou apenas demonstrativo.
-
-13. Não ignorar erros de compilação.
-
-14. Verificar se o APK foi realmente gerado antes de declarar sucesso.
-
-15. Publicar o APK gerado em GitHub Actions Artifacts para permitir seu download.
-
-16. Criar um sistema organizado de logs mostrando cada etapa da conversão.
-
-17. Se o ZIP não contiver um projeto Android ou uma aplicação compatível, identificar a incompatibilidade e informar o que precisa ser convertido ou configurado.
-
-18. Utilizar configurações compatíveis e versões estáveis das ferramentas.
-
-ENTREGA:
-Criar todos os arquivos necessários para o funcionamento real do sistema, incluindo o workflow YAML completo e eventuais scripts auxiliares.
-
-RESULTADO ESPERADO:
-ENVIAR ZIP → EXTRAIR PROJETO → IDENTIFICAR TECNOLOGIA → CONFIGURAR DEPENDÊNCIAS → COMPILAR → GERAR APK → DISPONIBILIZAR DOWNLOAD.
-
-Não quero apenas explicações ou exemplos. Quero os arquivos completos, funcionais e prontos para serem adicionados ao repositório GitHub.
+      - name: Disponibilizar APK para download
+        uses: actions/upload-artifact@v4
+        with:
+          name: aplicativo-android
+          path: output/*.apk
+          if-no-files-found: error
+          
