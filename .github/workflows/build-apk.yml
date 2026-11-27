@@ -19,21 +19,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Baixar o repositório
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2. Configurar Java
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
+      # 3. Configurar Android SDK
       - name: Configure Android SDK
+        shell: bash
         run: |
           SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
 
+      # 4. Instalar pacotes Android
       - name: Install Android SDK packages
         shell: bash
         run: |
@@ -41,7 +46,7 @@ jobs:
           SDKMANAGER=$(find "$SDK/cmdline-tools" -name sdkmanager -type f | head -n 1)
 
           if [ -z "$SDKMANAGER" ]; then
-            echo "SDK Manager not found"
+            echo "ERROR: SDK Manager not found"
             exit 1
           fi
 
@@ -52,41 +57,51 @@ jobs:
             "platforms;android-36" \
             "build-tools;36.0.0"
 
+      # 5. Configurar Gradle
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
 
+      # 6. Encontrar automaticamente a pasta correta do projeto
       - name: Locate Android project
         shell: bash
         run: |
-          SETTINGS=$(find . \
-            -type f \
-            -name settings.gradle.kts \
-            -not -path '*/.gradle/*' \
-            | head -n 1)
+          PROJECT_DIR=""
 
-          if [ -z "$SETTINGS" ]; then
-            SETTINGS=$(find . \
-              -type f \
-              -name settings.gradle \
-              -not -path '*/.gradle/*' \
-              | head -n 1)
-          fi
+          while IFS= read -r SETTINGS; do
+            DIR="$(dirname "$SETTINGS")"
 
-          if [ -z "$SETTINGS" ]; then
-            echo "ERROR: Gradle project not found."
-            find . -maxdepth 4 -type f | head -n 100
+            if [ -f "$DIR/app/build.gradle.kts" ] || [ -f "$DIR/app/build.gradle" ]; then
+              PROJECT_DIR="$DIR"
+              break
+            fi
+          done < <(
+            find . -type f \
+              \( -name "settings.gradle.kts" -o -name "settings.gradle" \) \
+              -not -path "*/.git/*" \
+              -not -path "*/.gradle/*" \
+              -not -path "*/build/*"
+          )
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: Android Gradle project not found."
+            echo "Repository files:"
+            find . -maxdepth 5 -type f | head -n 150
             exit 1
           fi
 
-          PROJECT_DIR=$(dirname "$SETTINGS")
+          PROJECT_DIR="$(realpath "$PROJECT_DIR")"
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-          echo "Android project found at: $PROJECT_DIR"
-          ls -la "$PROJECT_DIR"
+          echo "Android project found:"
+          echo "$PROJECT_DIR"
 
+          ls -la "$PROJECT_DIR"
+          ls -la "$PROJECT_DIR/app"
+
+      # 7. Gerar chave de assinatura de depuração
       - name: Generate debug keystore
         shell: bash
         run: |
@@ -105,9 +120,16 @@ jobs:
               -validity 10000
           fi
 
-      - name: Verify Gradle
-        run: gradle --version
+          echo "Debug keystore ready."
 
+      # 8. Verificar Gradle
+      - name: Verify Gradle
+        shell: bash
+        run: |
+          gradle --version
+          test -f "$PROJECT_DIR/settings.gradle.kts" || test -f "$PROJECT_DIR/settings.gradle"
+
+      # 9. Compilar APK
       - name: Build StormLauncher APK
         shell: bash
         run: |
@@ -115,6 +137,7 @@ jobs:
             :app:assembleDebug \
             --stacktrace
 
+      # 10. Verificar se o APK foi criado
       - name: Verify APK
         shell: bash
         run: |
@@ -122,17 +145,20 @@ jobs:
 
           if [ ! -f "$APK" ]; then
             echo "ERROR: APK was not generated."
+            echo "Searching for generated APK files..."
+            find "$PROJECT_DIR" -type f -name "*.apk"
             exit 1
           fi
 
           echo "APK successfully generated!"
           ls -lh "$APK"
 
+      # 11. Disponibilizar APK para download
       - name: Upload StormLauncher APK
         uses: actions/upload-artifact@v4
         with:
           name: StormLauncher-Android-APK
-          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
+          path: '**/app/build/outputs/apk/debug/app-debug.apk'
           if-no-files-found: error
           retention-days: 14
           
