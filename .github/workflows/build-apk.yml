@@ -1,46 +1,63 @@
-name: Build APK
+Crie um CONVERSOR UNIVERSAL DE ZIP PARA APK ANDROID utilizando GitHub Actions.
 
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
+OBJETIVO: Transformar automaticamente um arquivo .ZIP contendo um projeto de aplicativo em um arquivo .APK instalável em dispositivos Android.
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+INSTRUÇÕES:
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+1. Criar o arquivo .github/workflows/zip-to-apk.yml.
 
-      - name: Extract stormlauncher-core.zip
-        run: |
-          unzip -o stormlauncher-core.zip
-          ls -la
+2. Configurar o GitHub Actions para funcionar com Ubuntu.
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v5
-        with:
-          java-version: '17'
-          distribution: 'temurin'
+3. Permitir iniciar a compilação manualmente pelo botão Run workflow.
 
-      - name: Build Debug APK
-        run: |
-          set -o pipefail
-          gradle assembleDebug --stacktrace 2>&1 | tee build.log
+4. Localizar automaticamente o arquivo ZIP enviado ao repositório.
 
-      - name: Show error details if failed
-        if: failure()
-        run: |
-          echo "=== DETALHES DO ERRO ==="
-          grep -n -E "FAILURE:|What went wrong:|Execution failed|Caused by:|e: " build.log | tail -n 60 || true
-          echo "=== ULTIMAS 40 LINHAS ==="
-          tail -n 40 build.log
+5. Extrair o conteúdo completo do ZIP, preservando a estrutura das pastas.
 
-      - name: Upload APK
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: stormlauncher-core-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
-          
+6. Analisar automaticamente o projeto e identificar sua tecnologia:
+- Android Studio
+- Java
+- Kotlin
+- Flutter
+- React Native
+- Ionic
+- Capacitor
+- HTML, CSS e JavaScript
+
+7. Instalar automaticamente as ferramentas e dependências necessárias, incluindo:
+- Java JDK
+- Android SDK
+- Android Build Tools
+- Gradle
+- Flutter SDK, quando necessário
+- Node.js, quando necessário
+
+8. Identificar automaticamente o arquivo principal de configuração do projeto.
+
+9. Executar o processo correto de compilação conforme a tecnologia identificada.
+
+10. Gerar um arquivo APK Android verdadeiro, válido e instalável.
+
+11. Se houver erros, executar um diagnóstico detalhado e apresentar a causa e possíveis soluções.
+
+12. Não criar APK falso, vazio ou apenas demonstrativo.
+
+13. Não ignorar erros de compilação.
+
+14. Verificar se o APK foi realmente gerado antes de declarar sucesso.
+
+15. Publicar o APK gerado em GitHub Actions Artifacts para permitir seu download.
+
+16. Criar um sistema organizado de logs mostrando cada etapa da conversão.
+
+17. Se o ZIP não contiver um projeto Android ou uma aplicação compatível, identificar a incompatibilidade e informar o que precisa ser convertido ou configurado.
+
+18. Utilizar configurações compatíveis e versões estáveis das ferramentas.
+
+ENTREGA:
+Criar todos os arquivos necessários para o funcionamento real do sistema, incluindo o workflow YAML completo e eventuais scripts auxiliares.
+
+RESULTADO ESPERADO:
+ENVIAR ZIP → EXTRAIR PROJETO → IDENTIFICAR TECNOLOGIA → CONFIGURAR DEPENDÊNCIAS → COMPILAR → GERAR APK → DISPONIBILIZAR DOWNLOAD.
+
+Não quero apenas explicações ou exemplos. Quero os arquivos completos, funcionais e prontos para serem adicionados ao repositório GitHub.
