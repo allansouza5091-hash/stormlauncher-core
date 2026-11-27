@@ -4,198 +4,65 @@ name: StormLauncher - Auto Build APK
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
 
 jobs:
   build:
-    name: Construção automática do APK
+    name: Build Android APK
     runs-on: ubuntu-latest
-    timeout-minutes: 45
 
     steps:
-      - name: Baixar projeto
+      - name: Download repository
         uses: actions/checkout@v4
 
-      - name: Configurar Java 17
-        uses: actions/setup-java@v5
+      - name: Configure Java
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Configurar Android SDK
-        uses: android-actions/setup-android@v4
+      - name: Configure Android SDK
+        uses: android-actions/setup-android@v3
 
-      - name: Instalar Android SDK
-        run: |
-          yes | sdkmanager --licenses
-          sdkmanager \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
-
-      - name: Instalar Gradle
+      - name: Configure Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.13'
 
-      - name: Detectar projeto
-        id: detect
+      - name: Prepare debug keystore
         run: |
-          if [ -f settings.gradle ] || [ -f settings.gradle.kts ]; then
-            echo "mode=root" >> "$GITHUB_OUTPUT"
-          elif [ -f app/settings.gradle ] || [ -f app/settings.gradle.kts ]; then
-            echo "mode=app" >> "$GITHUB_OUTPUT"
-          else
-            echo "mode=create" >> "$GITHUB_OUTPUT"
-          fi
+          keytool -genkeypair \
+            -v \
+            -keystore debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US" \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000
 
-      - name: Criar estrutura mínima se necessário
-        if: steps.detect.outputs.mode == 'create'
+      - name: Grant Gradle permissions
+        run: chmod +x gradlew
+
+      - name: Build APK
+        run: ./gradlew :app:assembleDebug --stacktrace
+
+      - name: Verify APK
         run: |
-          mkdir -p app/src/main/java/com/stormlauncher/app
+          test -f app/build/outputs/apk/debug/app-debug.apk
+          ls -lh app/build/outputs/apk/debug/app-debug.apk
 
-          cat > settings.gradle <<'EOF'
-          pluginManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-              }
-          }
-          dependencyResolutionManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-          }
-          rootProject.name = "StormLauncher"
-          include(":app")
-          EOF
-
-          cat > build.gradle <<'EOF'
-          plugins {
-              id 'com.android.application' version '8.10.1' apply false
-          }
-          EOF
-
-          cat > gradle.properties <<'EOF'
-          org.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8
-          android.useAndroidX=true
-          EOF
-
-          cat > app/build.gradle <<'EOF'
-          plugins {
-              id 'com.android.application'
-          }
-
-          android {
-              namespace 'com.stormlauncher.app'
-              compileSdk 35
-
-              defaultConfig {
-                  applicationId 'com.stormlauncher.app'
-                  minSdk 23
-                  targetSdk 35
-                  versionCode 1
-                  versionName '1.0'
-              }
-          }
-          EOF
-
-          cat > app/src/main/AndroidManifest.xml <<'EOF'
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <application
-                  android:label="StormLauncher"
-                  android:theme="@android:style/Theme.Material.Light.NoActionBar">
-                  <activity
-                      android:name=".MainActivity"
-                      android:exported="true">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN"/>
-                          <category android:name="android.intent.category.LAUNCHER"/>
-                      </intent-filter>
-                  </activity>
-              </application>
-          </manifest>
-          EOF
-
-          cat > app/src/main/java/com/stormlauncher/app/MainActivity.java <<'EOF'
-          package com.stormlauncher.app;
-
-          import android.app.Activity;
-          import android.os.Bundle;
-          import android.widget.TextView;
-          import android.graphics.Color;
-
-          public class MainActivity extends Activity {
-              @Override
-              protected void onCreate(Bundle state) {
-                  super.onCreate(state);
-                  TextView view = new TextView(this);
-                  view.setText("StormLauncher");
-                  view.setTextSize(28);
-                  view.setTextColor(Color.WHITE);
-                  view.setGravity(17);
-                  view.setBackgroundColor(Color.rgb(15,20,35));
-                  setContentView(view);
-              }
-          }
-          EOF
-
-      - name: Compilar e tentar recuperar erros
-        shell: bash
-        run: |
-          set +e
-
-          for attempt in 1 2 3; do
-            echo "Tentativa de compilação: $attempt"
-
-            gradle --stop
-
-            gradle assembleDebug \
-              --no-daemon \
-              --refresh-dependencies \
-              --stacktrace
-
-            if [ $? -eq 0 ]; then
-              echo "APK compilado com sucesso!"
-              exit 0
-            fi
-
-            echo "Tentando recuperar ambiente..."
-
-            chmod +x gradlew 2>/dev/null || true
-
-            rm -rf .gradle/caches/build-cache-* 2>/dev/null || true
-
-            sleep 5
-          done
-
-          echo "Não foi possível corrigir automaticamente o erro."
-          exit 1
-
-      - name: Verificar APK
-        run: |
-          APK=$(find . -path "*/build/outputs/apk/debug/*.apk" -type f | head -n 1)
-
-          if [ -z "$APK" ]; then
-            echo "APK não encontrado!"
-            exit 1
-          fi
-
-          mkdir -p final
-          cp "$APK" final/StormLauncher.apk
-
-          echo "APK pronto: final/StormLauncher.apk"
-
-      - name: Disponibilizar APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: StormLauncher-APK
-          path: final/StormLauncher.apk
+          name: StormLauncher-Android-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 14
           
