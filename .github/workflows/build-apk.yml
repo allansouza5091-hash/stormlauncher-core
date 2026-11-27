@@ -1,5 +1,5 @@
 
-name: Criar APK StormLauncher
+name: StormLauncher - Auto Build APK
 
 on:
   workflow_dispatch:
@@ -11,14 +11,15 @@ permissions:
 
 jobs:
   build:
-    name: Criar aplicativo Android
+    name: Construção automática do APK
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - name: Baixar projeto
         uses: actions/checkout@v4
 
-      - name: Configurar Java
+      - name: Configurar Java 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -27,12 +28,32 @@ jobs:
       - name: Configurar Android SDK
         uses: android-actions/setup-android@v4
 
-      - name: Instalar ferramentas
+      - name: Instalar Android SDK
         run: |
           yes | sdkmanager --licenses
-          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
 
-      - name: Criar estrutura Android automaticamente
+      - name: Instalar Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Detectar projeto
+        id: detect
+        run: |
+          if [ -f settings.gradle ] || [ -f settings.gradle.kts ]; then
+            echo "mode=root" >> "$GITHUB_OUTPUT"
+          elif [ -f app/settings.gradle ] || [ -f app/settings.gradle.kts ]; then
+            echo "mode=app" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=create" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Criar estrutura mínima se necessário
+        if: steps.detect.outputs.mode == 'create'
         run: |
           mkdir -p app/src/main/java/com/stormlauncher/app
 
@@ -45,7 +66,6 @@ jobs:
               }
           }
           dependencyResolutionManagement {
-              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
               repositories {
                   google()
                   mavenCentral()
@@ -62,7 +82,7 @@ jobs:
           EOF
 
           cat > gradle.properties <<'EOF'
-          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          org.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8
           android.useAndroidX=true
           EOF
 
@@ -73,12 +93,12 @@ jobs:
 
           android {
               namespace 'com.stormlauncher.app'
-              compileSdk 36
+              compileSdk 35
 
               defaultConfig {
                   applicationId 'com.stormlauncher.app'
                   minSdk 23
-                  targetSdk 36
+                  targetSdk 35
                   versionCode 1
                   versionName '1.0'
               }
@@ -112,38 +132,70 @@ jobs:
 
           public class MainActivity extends Activity {
               @Override
-              protected void onCreate(Bundle savedInstanceState) {
-                  super.onCreate(savedInstanceState);
-
-                  TextView text = new TextView(this);
-                  text.setText("StormLauncher");
-                  text.setTextSize(28);
-                  text.setTextColor(Color.WHITE);
-                  text.setGravity(17);
-
-                  android.widget.FrameLayout layout =
-                      new android.widget.FrameLayout(this);
-                  layout.setBackgroundColor(Color.rgb(15, 20, 35));
-                  layout.addView(text);
-
-                  setContentView(layout);
+              protected void onCreate(Bundle state) {
+                  super.onCreate(state);
+                  TextView view = new TextView(this);
+                  view.setText("StormLauncher");
+                  view.setTextSize(28);
+                  view.setTextColor(Color.WHITE);
+                  view.setGravity(17);
+                  view.setBackgroundColor(Color.rgb(15,20,35));
+                  setContentView(view);
               }
           }
           EOF
 
-      - name: Instalar Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.13'
+      - name: Compilar e tentar recuperar erros
+        shell: bash
+        run: |
+          set +e
 
-      - name: Compilar APK
-        run: gradle assembleDebug --no-daemon --stacktrace
+          for attempt in 1 2 3; do
+            echo "Tentativa de compilação: $attempt"
+
+            gradle --stop
+
+            gradle assembleDebug \
+              --no-daemon \
+              --refresh-dependencies \
+              --stacktrace
+
+            if [ $? -eq 0 ]; then
+              echo "APK compilado com sucesso!"
+              exit 0
+            fi
+
+            echo "Tentando recuperar ambiente..."
+
+            chmod +x gradlew 2>/dev/null || true
+
+            rm -rf .gradle/caches/build-cache-* 2>/dev/null || true
+
+            sleep 5
+          done
+
+          echo "Não foi possível corrigir automaticamente o erro."
+          exit 1
+
+      - name: Verificar APK
+        run: |
+          APK=$(find . -path "*/build/outputs/apk/debug/*.apk" -type f | head -n 1)
+
+          if [ -z "$APK" ]; then
+            echo "APK não encontrado!"
+            exit 1
+          fi
+
+          mkdir -p final
+          cp "$APK" final/StormLauncher.apk
+
+          echo "APK pronto: final/StormLauncher.apk"
 
       - name: Disponibilizar APK
         uses: actions/upload-artifact@v4
         with:
           name: StormLauncher-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: final/StormLauncher.apk
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
           
