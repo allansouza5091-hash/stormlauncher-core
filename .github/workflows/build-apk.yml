@@ -29,7 +29,6 @@ jobs:
           java-version: '17'
 
       - name: Configure Android SDK
-        shell: bash
         run: |
           SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
@@ -39,9 +38,7 @@ jobs:
         shell: bash
         run: |
           SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-
-          SDKMANAGER=$(find "$SDK/cmdline-tools" \
-            -name sdkmanager -type f | head -n 1)
+          SDKMANAGER=$(find "$SDK/cmdline-tools" -name sdkmanager -type f | head -n 1)
 
           if [ -z "$SDKMANAGER" ]; then
             echo "SDK Manager not found"
@@ -55,45 +52,87 @@ jobs:
             "platforms;android-36" \
             "build-tools;36.0.0"
 
-      - name: Setup Gradle 9.3.1
+      - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
 
-      - name: Generate debug keystore
+      - name: Locate Android project
+        shell: bash
         run: |
-          keytool -genkeypair \
-            -v \
-            -keystore debug.keystore \
-            -storepass android \
-            -alias androiddebugkey \
-            -keypass android \
-            -dname "CN=Android Debug,O=Android,C=US" \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000
+          SETTINGS=$(find . \
+            -type f \
+            -name settings.gradle.kts \
+            -not -path '*/.gradle/*' \
+            | head -n 1)
+
+          if [ -z "$SETTINGS" ]; then
+            SETTINGS=$(find . \
+              -type f \
+              -name settings.gradle \
+              -not -path '*/.gradle/*' \
+              | head -n 1)
+          fi
+
+          if [ -z "$SETTINGS" ]; then
+            echo "ERROR: Gradle project not found."
+            find . -maxdepth 4 -type f | head -n 100
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$SETTINGS")
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+          echo "Android project found at: $PROJECT_DIR"
+          ls -la "$PROJECT_DIR"
+
+      - name: Generate debug keystore
+        shell: bash
+        run: |
+          cd "$PROJECT_DIR"
+
+          if [ ! -f debug.keystore ]; then
+            keytool -genkeypair \
+              -v \
+              -keystore debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -dname "CN=Android Debug,O=Android,C=US" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000
+          fi
 
       - name: Verify Gradle
         run: gradle --version
 
       - name: Build StormLauncher APK
-        run: gradle :app:assembleDebug --stacktrace
+        shell: bash
+        run: |
+          gradle -p "$PROJECT_DIR" \
+            :app:assembleDebug \
+            --stacktrace
 
       - name: Verify APK
+        shell: bash
         run: |
-          APK="app/build/outputs/apk/debug/app-debug.apk"
+          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
 
           if [ ! -f "$APK" ]; then
-            echo "APK was not generated"
+            echo "ERROR: APK was not generated."
             exit 1
           fi
 
+          echo "APK successfully generated!"
           ls -lh "$APK"
 
-      - name: Upload APK
+      - name: Upload StormLauncher APK
         uses: actions/upload-artifact@v4
         with:
           name: StormLauncher-Android-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+          
