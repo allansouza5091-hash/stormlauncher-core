@@ -1,8 +1,13 @@
 
-name: ZIP para APK Android
+name: ZIP TO APK MASTER BUILDER
 
 on:
   workflow_dispatch:
+    inputs:
+      zip_file:
+        description: "Nome do ZIP na raiz do repositorio (opcional)"
+        required: false
+        type: string
   push:
     paths:
       - "*.zip"
@@ -12,70 +17,178 @@ permissions:
 
 jobs:
   build:
+    name: Extrair e compilar APK
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
-      - name: Baixar repositório
+      - name: Baixar repositorio
         uses: actions/checkout@v4
 
-      - name: Instalar Java
+      - name: Configurar Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: Instalar Android SDK
+      - name: Configurar Android SDK
         uses: android-actions/setup-android@v3
 
       - name: Instalar ferramentas
+        shell: bash
         run: |
+          set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y unzip zip
 
-      - name: Localizar e extrair ZIP
+      - name: Verificar arquivo ZIP
+        shell: bash
+        env:
+          ZIP_INPUT: ${{ inputs.zip_file }}
         run: |
-          ZIP=$(find . -maxdepth 1 -name "*.zip" | head -n 1)
-          if [ -z "$ZIP" ]; then
-            echo "ERRO: Nenhum arquivo ZIP encontrado."
-            exit 1
-          fi
-          mkdir -p extracted
-          unzip -q "$ZIP" -d extracted
+          set -euo pipefail
 
-      - name: Identificar projeto Android
-        run: |
-          if [ -f extracted/gradlew ]; then
-            PROJECT="extracted"
+          if [ -n "$ZIP_INPUT" ]; then
+            ZIP_FILE="$ZIP_INPUT"
           else
-            GRADLEW=$(find extracted -name gradlew -type f | head -n 1)
-            if [ -z "$GRADLEW" ]; then
-              echo "ERRO: Projeto Gradle Android não encontrado."
+            mapfile -t ZIPS < <(find . -maxdepth 1 -type f -iname "*.zip")
+            if [ "${#ZIPS[@]}" -ne 1 ]; then
+              echo "::error::Coloque exatamente um ZIP na raiz ou informe seu nome."
               exit 1
             fi
-            PROJECT=$(dirname "$GRADLEW")
+            ZIP_FILE="${ZIPS[0]}"
           fi
-          echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
-          chmod +x "$PROJECT/gradlew"
 
-      - name: Compilar APK
-        run: |
-          cd "$PROJECT"
-          ./gradlew assembleDebug --no-daemon
-
-      - name: Localizar APK
-        run: |
-          mkdir -p output
-          find "$PROJECT" -type f -name "*.apk" -exec cp {} output/ \;
-          if [ -z "$(find output -name '*.apk' -print -quit)" ]; then
-            echo "ERRO: APK não foi gerado."
+          if [ ! -f "$ZIP_FILE" ]; then
+            echo "::error::Arquivo ZIP nao encontrado: $ZIP_FILE"
             exit 1
           fi
+
+          unzip -t "$ZIP_FILE"
+          echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
+
+      - name: Extrair projeto
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p extracted
+
+          unzip -q "$ZIP_FILE" -d extracted
+
+          if [ -z "$(find extracted -type f -print -quit)" ]; then
+            echo "::error::O ZIP esta vazio."
+            exit 1
+          fi
+
+          echo "Extracao concluida."
+
+      - name: Localizar projeto Android
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SETTINGS=$(find extracted -type f \
+            \( -name settings.gradle -o -name settings.gradle.kts \) \
+            -print -quit)
+
+          if [ -z "$SETTINGS" ]; then
+            echo "::error::Projeto Gradle Android nao encontrado no ZIP."
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$SETTINGS")
+
+          if [ ! -f "$PROJECT_DIR/gradlew" ]; then
+            echo "::error::Gradle Wrapper nao encontrado junto ao projeto."
+            exit 1
+          fi
+
+          chmod +x "$PROJECT_DIR/gradlew"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+          echo "Projeto encontrado: $PROJECT_DIR"
+
+      - name: Instalar plataformas Android
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-28" \
+            "platforms;android-29" \
+            "platforms;android-30" \
+            "platforms;android-31" \
+            "platforms;android-32" \
+            "platforms;android-33" \
+            "platforms;android-34" \
+            "platforms;android-35" \
+            "platforms;android-36" \
+            "build-tools;35.0.0" \
+            "build-tools;36.0.0"
+
+      - name: Diagnosticar Gradle
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+
+          ./gradlew --version
+          ./gradlew tasks --all --no-daemon
+
+      - name: Compilar APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "$PROJECT_DIR"
+
+          ./gradlew assembleDebug \
+            --no-daemon \
+            --stacktrace \
+            --warning-mode all
+
+      - name: Verificar APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p output
+
+          find "$PROJECT_DIR" \
+            -type f \
+            -path "*/build/outputs/apk/*" \
+            -name "*.apk" \
+            -exec cp {} output/ \;
+
+          if [ -z "$(find output -type f -name '*.apk' -print -quit)" ]; then
+            echo "::error::Nenhum APK foi gerado."
+            exit 1
+          fi
+
+          for APK in output/*.apk; do
+            echo "APK encontrado: $APK"
+            ls -lh "$APK"
+          done
 
       - name: Disponibilizar APK para download
         uses: actions/upload-artifact@v4
         with:
-          name: aplicativo-android
+          name: APK-ANDROID-FINAL
           path: output/*.apk
           if-no-files-found: error
+          retention-days: 14
+
+      - name: Resultado final
+        if: success()
+        run: |
+          echo "COMPILACAO CONCLUIDA!"
+          echo "APK disponibilizado em Artifacts."
+
+      - name: Relatorio de erro
+        if: failure()
+        run: |
+          echo "::error::A compilacao falhou. Consulte os logs da etapa que apresentou erro."
           
