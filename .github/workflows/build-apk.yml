@@ -1,10 +1,85 @@
-      - name: Compilar aplicativo
-        run: |
-          PROJECT_DIR=$(find . -type f \( -name "settings.gradle.kts" -o -name "settings.gradle" \) -not -path "*/.gradle/*" -print -quit | xargs -r dirname)
 
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "ERRO: settings.gradle.kts não encontrado!"
-            exit 1
+name: Gerar APK StormLauncher
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Compilar StormLauncher APK
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Baixar o projeto
+      - name: Baixar projeto
+        uses: actions/checkout@v4
+
+      # 2. Configurar Java
+      - name: Configurar Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      # 3. Configurar Gradle
+      - name: Configurar Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      # 4. Configurar Android SDK
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v4
+
+      # 5. Instalar componentes Android
+      - name: Instalar SDK
+        run: |
+          yes | sdkmanager --licenses
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0"
+
+      # 6. Localizar projeto Android
+      - name: Verificar estrutura
+        run: |
+          echo "Arquivos do projeto:"
+          ls -la
+
+          if [ ! -f settings.gradle ] && [ ! -f settings.gradle.kts ]; then
+            if [ ! -f app/settings.gradle ] && [ ! -f app/settings.gradle.kts ]; then
+              echo "ERRO: Projeto Gradle não encontrado."
+              exit 1
+            fi
           fi
 
-          gradle -p "$PROJECT_DIR" :app:assembleDebug --stacktrace
+      # 7. Compilar APK
+      - name: Compilar aplicativo
+        run: |
+          if [ -f gradlew ]; then
+            chmod +x gradlew
+            ./gradlew assembleDebug --stacktrace
+          elif [ -f settings.gradle ] || [ -f settings.gradle.kts ]; then
+            gradle assembleDebug --stacktrace
+          else
+            cd app
+            gradle assembleDebug --stacktrace
+          fi
+
+      # 8. Localizar e salvar APK
+      - name: Salvar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: StormLauncher-APK
+          path: |
+            **/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+          
